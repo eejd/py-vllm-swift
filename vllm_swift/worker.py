@@ -39,6 +39,15 @@ if TYPE_CHECKING:
 logger = init_logger(__name__)
 
 
+def _compilation_times():
+    """Zero compilation times in vLLM's own type when it exists (>= 0.27)."""
+    try:
+        from vllm.v1.worker.worker_base import CompilationTimes
+    except ImportError:  # older vLLM: return value is ignored
+        return None
+    return CompilationTimes(language_model=0.0, encoder=0.0)
+
+
 def _resolve_model_path(model_name: str) -> str:
     """Resolve model name to local directory with MLX-format weights.
 
@@ -213,15 +222,20 @@ class SwiftMetalWorker:
         """Initialize from KV cache config (no-op, Swift manages cache)."""
         pass
 
-    def compile_or_warm_up_model(self) -> None:
-        """Warm up the model."""
-        if self.engine is None:
-            return
-        # Run a tiny prefill to warm up Metal kernels
-        warmup_tokens = [1, 2, 3]
-        self.engine.prefill(warmup_tokens, temperature=0.0)
-        self.engine.reset()
-        logger.info("Swift engine warmed up")
+    def compile_or_warm_up_model(self):
+        """Warm up the model.
+
+        vLLM >= 0.27 expects a ``CompilationTimes`` back (the executor reads
+        ``.language_model`` / ``.encoder`` off every worker's result); older
+        releases ignore the return value.
+        """
+        if self.engine is not None:
+            # Run a tiny prefill to warm up Metal kernels
+            warmup_tokens = [1, 2, 3]
+            self.engine.prefill(warmup_tokens, temperature=0.0)
+            self.engine.reset()
+            logger.info("Swift engine warmed up")
+        return _compilation_times()
 
     def execute_model(self, scheduler_output: SchedulerOutput) -> ModelRunnerOutput | None:
         """Execute model for scheduled requests.
