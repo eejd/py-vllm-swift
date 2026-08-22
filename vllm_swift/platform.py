@@ -397,6 +397,16 @@ class SwiftMetalPlatform(Platform):
             return False
         # Check if the Swift bridge dylib can be loaded — that's the real requirement.
         # No Python MLX dependency needed.
+        #
+        # Fail CLOSED. vLLM permits exactly one out-of-tree platform plugin to
+        # activate and raises RuntimeError when two do
+        # (vllm/platforms/__init__.py: "Only one platform plugin can be
+        # activated"). Returning True on an exception means this plugin claims
+        # the slot on any Apple Silicon machine even when its own Swift bridge
+        # is missing or unloadable — which both breaks this plugin's own
+        # startup later and pre-empts any other correctly-installed plugin.
+        # Declining is the documented contract: the entry point returns None
+        # when the platform is not usable.
         try:
             import os
 
@@ -404,7 +414,11 @@ class SwiftMetalPlatform(Platform):
 
             return os.path.exists(_find_lib_path())
         except Exception:
-            return True  # arm64 + Darwin = assume available
+            logger.debug(
+                "Swift Metal platform unavailable: the Swift bridge library "
+                "could not be located", exc_info=True
+            )
+            return False
 
     @classmethod
     def get_device_capability(cls, device_id: int = 0) -> DeviceCapability:
