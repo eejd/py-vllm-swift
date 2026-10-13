@@ -148,3 +148,59 @@ assert w.parallel_config.rank == 3
 assert w.engine is None
 """
     )
+
+
+def test_the_advertised_layout_order_is_vllms_default_preference():
+    """The first entry is what ``resolve_kv_cache_layout`` picks when nothing
+    asks for another one; a reversed list would silently change it."""
+    _run_with_real_vllm(
+        _PRELUDE
+        + """
+from vllm.v1.attention.backends.utils import get_supported_kv_cache_layouts
+supported = rpc("get_supported_kv_cache_layouts")
+assert supported == [l.name for l in get_supported_kv_cache_layouts(())], supported
+assert supported[0] == "LBNHC"
+assert resolve_kv_cache_layout(w.vllm_config, [supported]).name == "LBNHC"
+"""
+    )
+
+
+def test_sample_tokens_hands_the_pending_output_over_once():
+    _run_with_real_vllm(
+        _PRELUDE
+        + """
+pending = object()
+w._pending_output = pending
+assert rpc("sample_tokens", None) is pending
+assert rpc("sample_tokens", None) is None  # not replayed on the next step
+"""
+    )
+
+
+def test_validate_request_rejects_structured_outputs_as_a_client_error():
+    """The bridge cannot apply a grammar bitmask; fail closed with a 4xx."""
+    _run_with_real_vllm(
+        """
+from vllm import SamplingParams
+from vllm.exceptions import VLLMClientError, VLLMValidationError
+from vllm.sampling_params import StructuredOutputsParams
+from vllm_swift.platform import SwiftMetalPlatform
+
+for so in (
+    StructuredOutputsParams(json_object=True),
+    StructuredOutputsParams(json={"type": "object"}),
+    StructuredOutputsParams(regex="a+"),
+):
+    try:
+        SwiftMetalPlatform.validate_request(None, SamplingParams(structured_outputs=so))
+    except VLLMValidationError as e:
+        assert isinstance(e, VLLMClientError)
+        assert e.parameter == "structured_outputs", e.parameter
+    else:
+        raise AssertionError(f"accepted {so}")
+
+# Everything else is untouched.
+SwiftMetalPlatform.validate_request(None, SamplingParams(temperature=0.7, top_p=0.9))
+SwiftMetalPlatform.validate_request(None, SamplingParams())
+"""
+    )
