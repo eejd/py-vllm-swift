@@ -93,3 +93,58 @@ def test_profile_takes_the_prefix_the_executor_sends():
 assert rpc("profile", True, "prefix") is None
 """
     )
+
+
+def test_synchronize_device_is_the_workers_own_not_a_torch_accelerator_wait():
+    _run_with_real_vllm(
+        """
+import torch
+from vllm.v1.worker.worker_base import WorkerBase
+from vllm_swift.worker import SwiftMetalWorker
+
+assert SwiftMetalWorker.synchronize_device is not WorkerBase.synchronize_device
+
+def torch_wait():
+    raise AssertionError("waited on torch.accelerator")
+
+torch.accelerator.synchronize = torch_wait
+w = object.__new__(SwiftMetalWorker)
+from vllm.v1.serial_utils import run_method
+assert run_method(w, "synchronize_device", (), {}) is None
+"""
+    )
+
+
+def test_constructor_runs_workerbase_init_and_keeps_the_ranks():
+    """SwiftMetalWorker(...) as ``WorkerWrapperBase.init_worker`` builds it."""
+    _run_with_real_vllm(
+        """
+import json, os, tempfile
+from vllm.config import ModelConfig, VllmConfig
+from vllm_swift.worker import SwiftMetalWorker
+
+with tempfile.TemporaryDirectory() as model_dir:
+    with open(os.path.join(model_dir, "config.json"), "w") as f:
+        json.dump({
+            "architectures": ["LlamaForCausalLM"], "model_type": "llama",
+            "hidden_size": 32, "intermediate_size": 64, "num_hidden_layers": 2,
+            "num_attention_heads": 4, "num_key_value_heads": 2, "vocab_size": 100,
+            "max_position_embeddings": 256, "torch_dtype": "float16",
+        }, f)
+    model_config = ModelConfig(
+        model=model_dir, tokenizer=model_dir, skip_tokenizer_init=True
+    )
+    vllm_config = VllmConfig(model_config=model_config)
+    w = SwiftMetalWorker(
+        vllm_config, local_rank=1, rank=3,
+        distributed_init_method="file:///unused", is_driver_worker=False,
+    )
+
+assert (w.rank, w.local_rank, w.is_driver_worker) == (3, 1, False)
+assert w.model_config is model_config
+assert w.cache_config is vllm_config.cache_config
+# WorkerBase.__init__ records the rank on the shared parallel config.
+assert w.parallel_config.rank == 3
+assert w.engine is None
+"""
+    )

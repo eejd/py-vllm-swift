@@ -545,6 +545,16 @@ class SwiftMetalWorker(WorkerBase):
         if self.engine is None:
             raise RuntimeError("Swift engine not initialized")
 
+    def synchronize_device(self) -> None:
+        """Nothing to wait for: no device work outlives a bridge call.
+
+        Every bridge call evaluates its result and returns host token ids
+        (``eval`` / ``.item()`` in Bridge.swift), so by the time a call returns
+        the work is done. ``WorkerBase`` waits on ``torch.accelerator``
+        instead, which is not the MLX runtime statically linked into the
+        bridge (nor the Python ``mlx`` package's).
+        """
+
     def profile(self, is_start: bool = True, profile_prefix: str | None = None) -> None:
         logger.warning("Profiling not supported on Swift Metal")
 
