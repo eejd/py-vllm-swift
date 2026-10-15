@@ -30,6 +30,7 @@ from vllm.v1.kv_cache_interface import (
     KVCacheSpec,
 )
 from vllm.v1.outputs import ModelRunnerOutput
+from vllm.v1.worker.worker_base import WorkerBase
 
 from vllm_swift.engine_bridge import SwiftInferenceEngine
 
@@ -94,7 +95,7 @@ def _resolve_model_path(model_name: str) -> str:
     return model_name
 
 
-class SwiftMetalWorker:
+class SwiftMetalWorker(WorkerBase):
     """Worker that drives inference via the Swift mlx-swift-lm engine.
 
     Implements the vLLM WorkerBase protocol. The Swift engine handles
@@ -112,14 +113,13 @@ class SwiftMetalWorker:
         is_driver_worker: bool = True,
         **kwargs: Any,
     ):
-        self.vllm_config = vllm_config
-        self.model_config = vllm_config.model_config
-        self.cache_config = vllm_config.cache_config
-        self.parallel_config = vllm_config.parallel_config
-        self.local_rank = local_rank
-        self.rank = rank
-        self.distributed_init_method = distributed_init_method
-        self.is_driver_worker = is_driver_worker
+        super().__init__(
+            vllm_config,
+            local_rank,
+            rank,
+            distributed_init_method,
+            is_driver_worker,
+        )
 
         self.engine: SwiftInferenceEngine | None = None
         self.device = torch.device("cpu")
@@ -218,9 +218,31 @@ class SwiftMetalWorker:
         self.cache_config.num_gpu_blocks = num_gpu_blocks
         self.cache_config.num_cpu_blocks = num_cpu_blocks
 
+    def get_supported_kv_cache_layouts(self) -> list[str]:
+        """KV cache layouts this worker accepts, most preferred first.
+
+        vLLM >= 0.31 asks every worker at engine start-up and resolves one
+        layout for the whole model (``resolve_kv_cache_layout``); an empty
+        answer is a hard error there. The Swift engine allocates no
+        vLLM-side KV tensor, so no layout is unsupported and none is
+        preferred: the "no backend declares a set" case of vLLM's own
+        ``get_supported_kv_cache_layouts``, which returns the default
+        preference order. Asking it keeps ``VLLM_KV_CACHE_LAYOUT`` and KV
+        connector preferences resolvable as on the other platforms.
+        """
+        from vllm.v1.attention.backends.utils import get_supported_kv_cache_layouts
+
+        return [layout.name for layout in get_supported_kv_cache_layouts(())]
+
     def initialize_from_config(self, kv_cache_config: KVCacheConfig) -> None:
-        """Initialize from KV cache config (no-op, Swift manages cache)."""
-        pass
+        """Initialize from KV cache config (Swift manages the cache itself)."""
+        layout = getattr(kv_cache_config, "kv_cache_layout", None)
+        if layout is not None:
+            # Same adoption as GPUWorker: a worker created after the engine
+            # core resolved the layout only learns it through the config.
+            from vllm.v1.attention.backends.utils import record_kv_cache_layout
+
+            record_kv_cache_layout(self.cache_config, layout)
 
     def compile_or_warm_up_model(self):
         """Warm up the model.
@@ -513,6 +535,19 @@ class SwiftMetalWorker:
     def check_health(self) -> None:
         if self.engine is None:
             raise RuntimeError("Swift engine not initialized")
+
+    def synchronize_device(self) -> None:
+        """Nothing to wait for: no device work outlives a bridge call.
+
+        Every bridge call evaluates its result and returns host token ids
+        (``eval`` / ``.item()`` in Bridge.swift), so by the time a call returns
+        the work is done. ``WorkerBase`` waits on ``torch.accelerator``
+        instead, which is not the MLX runtime statically linked into the
+        bridge (nor the Python ``mlx`` package's).
+        """
+
+    def profile(self, is_start: bool = True, profile_prefix: str | None = None) -> None:
+        logger.warning("Profiling not supported on Swift Metal")
 
     def shutdown(self) -> None:
         if self.engine is not None:
