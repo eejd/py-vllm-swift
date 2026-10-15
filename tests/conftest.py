@@ -83,6 +83,26 @@ for mod_name in _VLLM_STUBS:
         elif mod_name == "vllm.distributed":
             stub.init_distributed_environment = MagicMock()
             stub.ensure_model_parallel_initialized = MagicMock()
+        elif mod_name == "vllm.v1.worker.worker_base":
+            def _worker_base_init(
+                self,
+                vllm_config,
+                local_rank,
+                rank,
+                distributed_init_method,
+                is_driver_worker=False,
+            ):
+                # The attributes the real WorkerBase.__init__ derives.
+                self.vllm_config = vllm_config
+                self.model_config = vllm_config.model_config
+                self.cache_config = vllm_config.cache_config
+                self.parallel_config = vllm_config.parallel_config
+                self.local_rank = local_rank
+                self.rank = rank
+                self.distributed_init_method = distributed_init_method
+                self.is_driver_worker = is_driver_worker
+
+            stub.WorkerBase = type("WorkerBase", (), {"__init__": _worker_base_init})
         elif mod_name == "vllm.utils.torch_utils":
             stub.set_random_seed = MagicMock()
         elif mod_name == "vllm.lora.request":

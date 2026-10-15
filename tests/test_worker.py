@@ -282,7 +282,7 @@ class TestSwiftMetalWorker:
 
     def test_initialize_from_config_noop(self):
         worker = self._make_worker()
-        worker.initialize_from_config(MagicMock())  # should not raise
+        worker.initialize_from_config(MagicMock(kv_cache_layout=None))
 
     def test_compile_warmup_without_engine(self):
         worker = self._make_worker()
