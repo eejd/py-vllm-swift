@@ -511,6 +511,29 @@ class SwiftMetalPlatform(Platform):
 
         logger.info("Swift Metal platform configured (uni-proc, Swift engine)")
 
+    @classmethod
+    def validate_request(cls, processed_inputs, params) -> None:
+        """Reject, as a 400, a request the Swift bridge would answer wrongly.
+
+        Structured outputs (``response_format`` json_schema, ``tool_choice``
+        required / named, guided decoding) need the grammar bitmask on the
+        logits before a token is sampled.  The bridge samples inside Swift and
+        ``SwiftMetalWorker.sample_tokens`` drops the bitmask, so such a request
+        gets a token the grammar rejects (HTTP 500) and a few at once took the
+        engine core down.  Fail closed until the bridge can take a bitmask.
+        """
+        if getattr(params, "structured_outputs", None) is not None:
+            from vllm.exceptions import VLLMValidationError
+
+            raise VLLMValidationError(
+                "structured_outputs (response_format json_schema, tool_choice "
+                "required or a named function, guided decoding) is not supported "
+                "on the Swift Metal platform: the bridge cannot apply a grammar "
+                "bitmask to its sampling",
+                parameter="structured_outputs",
+                value=None,
+            )
+
 
 class SwiftMetalPlatformPlugin:
     """Plugin entry point for vLLM platform system."""
