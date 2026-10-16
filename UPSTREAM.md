@@ -16,7 +16,7 @@ published sources, then cut `v<base>-local<NN>` again (archive the old tip first
 
 ## Behaviour rows (patches carried; one `topic/*` branch each, on top of `main`)
 
-| Topic branch | Change | Tests | Upstream PR |
+| Topic branch | Change | Existing tests covering it | Upstream PR |
 |---|---|---|---|
 | `topic/fail-closed-bridge` | `register()` returns `None` when the Swift bridge library cannot be located (vLLM permits one active platform plugin; "assume available" collided with every other backend) | `tests/test_platform.py` | not submitted |
 | `topic/manual-seed-all` | `SwiftMetalPlatform.manual_seed_all` (called in vLLM >= 0.27 worker init) | `tests/test_platform.py` | not submitted |
@@ -25,6 +25,8 @@ published sources, then cut `v<base>-local<NN>` again (archive the old tip first
 
 Adopted work from other repos: none.
 
+The three small topics add no tests of their own (their commits touch only `vllm_swift/`); the listed tests are the existing suite that covers them. Tracking issue for the vLLM 0.31 contract: [eejd/macports-ports-local#1243](https://github.com/eejd/macports-ports-local/issues/1243).
+
 ## Tags
 
-`v0.6.3-local01`: `v0.6.3` + the four topics above.
+`v0.6.3-local01`: `v0.6.3` + the four topics above (`cd4ce07`). Later commits on `local` that only change this file are not retagged.
